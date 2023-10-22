@@ -1,0 +1,504 @@
+// Set up Interrupt handling
+      MOV R12,#repeat
+      STR R12,.ClockISR
+      MOV R12, #200     //sets the clock interrupt frequency
+      STR R12,.ClockInterruptFrequency
+      MOV R12, #Move    //Prepares Keyboard interrupt
+      STR R12, .KeyboardISR //sets it
+      MOV R12, #1
+      STR R12, .KeyboardMask
+//starts the program and initialises the pixel screen
+      MOV R2, #.grey    //gets colour
+      MOV R0, #20       //start position
+      BL setPlay        //runs the function to make the entire screen grey
+      MOV R4, #0        //sets R4 to 0 array index
+      MOV R6, #SpinOne  //sets to the first spin array
+      BL randomizedCheck //gets the shape
+      MOV r8, #0        //sets R8 to 0
+      MOV R0, #31       //resets pixel index to middle
+      MOV R1, #0        //sets y to 0
+      b mainLoop        //runs the repeating function
+mainLoop:
+      MOV R12,#0        // stops it from repeating while drawing
+      STR R12, .InterruptRegister
+      MOV R8, #0        //resets the shape's line counter to 0
+      MOV R4, #0        //resets the array count to 0
+      MOV R2, #36       //gets the colour index
+      LDR R2, [R7+R2]   //sets the colour of the pixel
+      SUB R0, R0, #1    //moves x back one
+      bl shapeDrawer    //draw shape
+      MOV R12,#1
+      STR R12,.InterruptRegister //Enable all interrupts
+      b mainLoop        //repeating function
+//
+//checker stuff
+//
+checkBelow:
+      ADD R0, R0, #1    //increases x by 1
+      ADD R8, R8, #1    //increases horizontal counter
+      CMP R8, #4        //checks if the shape is done with its line
+      BEQ DownCheck     //moves down
+      CMP R4, #36       //checks if shape is done
+      BEQ stop
+      LDR R5, [R4 + R6] //loads the rotation index
+      LDR R5, [R7 + R5] //loads if there is a pixel required here
+      ADD R4,R4,#4      //increases word count
+      CMP R5, #0        //checks if there is not supposed to be pixel
+      BEQ checkBelow    //repeats
+      PUSH {R3-R12, LR} //adds stack
+      BL isDone         //checks if it has anything below it
+      POP {R3-R12, LR}  //returns stack
+      B checkBelow      //repeats
+isDone:
+      CMP R1, #48       //checks if it has gone below the screen
+      BEQ setIt         //sets shape
+      MOV R3, #.PixelScreen //sets the pixel screen
+      LSL R4, R0, #2    //gets words for x axis
+      LSL R5, R1, #8    //gets words for y axis
+      ADD R5, R4, R5    //adds x and y to get position
+      LDR R6, [R3+R5]   //loads the colour of that pixel
+      MOV R2, #.grey    //sets r2 to background
+      CMP R6, R2        //checks if fg matches bg
+      BNE setIt         //sets it
+      RET               //returns
+DownCheck:
+      MOV R8, #0        //resets line counter
+      ADD R1, R1, #1    //increases y-coord
+      SUB R0, R0, #4    //sets x-coord back to left
+      B checkBelow      //repeats function
+setIt:
+      POP {R3-R12, LR}  //returns 2 separate stacks
+      POP {R0-R12, LR}
+      SUB R1, R1, #1    //moves the shape up 1
+      MOV R8,#0         //sets shape counter to 0
+      MOV R2, #36       //gets colour of shape
+      LDR R2, [R7+R2]
+      PUSH {R3-R12, LR} //stack
+      BL shapeDrawer    //draws shape
+      POP {R3-R12, LR}  //returns stack
+      PUSH {R3-R12, LR} //stack
+      SUB R1, R1, #2    //move up 2
+      MOV R3, #.PixelScreen //sets pixel screen
+      MOV R8, #0        //sets the line index
+      MOV R0, #19
+      BL lineDumpCheck  //checks if line is full of pixels
+      POP {R3-R12, LR}  //returns stack
+      MOV R0, #31       //puts x axis in middle
+      MOV R1, #0        //puts y axis to top
+      MOV R8, #0        //resets line counter
+      MOV R10, #0       //resets rotation counter
+      MOV R6, #SpinOne  //resets spin
+      bl randomizedCheck //gets new shape
+      MOV r8, #0        //sets R8 to 0
+      MOV R0, #31       //resets pixel index to middle
+      MOV R1, #0        //moves the shape to top
+      b mainLoop        //runs the repeating function
+///
+///checkLine
+///
+lineDumpCheck:
+      ADD R0, R0, #1    //moves right one pixel
+      CMP R0, #44       //checks if it has finnished the line
+      BEQ LineFull      //removes the line
+      LSL R5, R0, #2    //gets the pixel index
+      LSL R4, R1, #8
+      ADD R5, R5, R4
+      LDR R5, [R3+R5]   //loads the pixel colour
+      MOV R2, #.grey    //checks if it is the same as the background
+      CMP R5, R2 
+      BEQ notFull       //if it is grey then it will move down a line and go again
+      B lineDumpCheck   //repeats
+notFull:
+      MOV R0, #20       //sets x-coordinate to left side of screen
+      ADD R8, R8, #1    //increases line counter
+      CMP R8, #4        //has it done every line of the shape just placed
+      BEQ stop          //stop removing the shape
+      ADD R1, R1, #1    //increases y coordinate
+      B lineDumpCheck   //repeats
+LineFull:
+      MOV R2, #.white   //sets colour to white
+      MOV R0, #20       //sets x coordinate to left side of play area
+removeLine:
+      LSL R5, R0, #2    //gets pixel index
+      LSL R4, R1, #8
+      ADD R5, R5, R4
+      STR R2, [R3+R5]   //draws pixel as white
+      ADD R0, R0, #1    //increases x coordinate
+      CMP R0, #45       //has it reached the other side?
+      BNE removeLine    //if not it will repeat
+      B notFull         //move down a line.
+doneChecking:
+      HALT
+//
+//end checker stuff
+//
+setKey:
+      MOV R12, #0
+      STR R12, .InterruptRegister
+      MOV R8, #0        //resets the shape's line counter to 0
+      MOV R4, #0        //resets the array count to 0
+      MOV R2, #.grey
+      SUB R0, R0, #1
+      BL shapeDrawer    //deleats the shape
+      CMP R11, #65      //if key is A it will move left
+      BEQ leftMove
+      CMP R11, #68      // if key is D it will move right
+      BEQ rightMove
+      CMP R11, #87      // if key is W then it will increase the rotation register
+      BEQ Spin
+      RFE
+repeat:
+      MOV R8, #0        //resets the shape's line counter to 0
+      MOV R4, #0        //resets the array count to 0
+      MOV R2, #.grey    //set colour to clear it
+      SUB R0,R0,#1      //move back one pixel
+      BL shapeDrawer    //clears the shape
+      MOV R8, #0        //resets the shape's line counter to 0
+      MOV R4, #0        //resets the array count to 0
+      ADD R1,R1,#1      //moves down line
+      SUB R0, R0, #1    //move back one pixel
+      PUSH {R0-R12, LR} //push stack
+      BL checkBelow     //draw "invisible" shape
+      POP {R0-R12, LR}  //return stack
+      ADD R0, R0, #1    //move right one
+      RFE               //Doesn't return to mainloop?
+//
+//initial screen
+//
+setPlay: 
+      MOV R3, #.PixelScreen //sets pixel screen
+      PUSH {R0-R12,LR}  //pushes stack
+      CMP R0, #45       //is at edge of play area?
+      BEQ setterDown    //go down a line
+      LSL R5, R0, #2    //get x word
+      LSL R4, R1, #8    //get y word
+      ADD R5, R4, R5    //add them
+      STR R2, [R5+R3]   //draw pixel
+      ADD R0, R0, #1    //move right one pixel
+      B setPlay         //repeat
+setterDown:
+      ADD R1, R1, #1    //move down one
+      CMP R1, #48       //is R1 at bottom
+      BEQ barsetter     //create black bars
+      MOV R0, #20       //move x back to left
+      B setPlay         //repeat
+barsetter: 
+      MOV R1, #0        //move y back to top
+      MOV R0, #19       //move x to left of play area
+barDown:
+      MOV R2, #.black   //set colour
+      LSL R4, R0, #2    //get x word
+      LSL R5, R1, #8    //get y word
+      ADD R5, R4, R5    //add them for pixel index
+      STR R2, [R3+R5]   //draw pixel
+      ADD R1, R1, #1    //move down one
+      CMP R1, #48       //is at bottom?
+      BEQ blackBarDone  //move
+      B barDown
+blackBarDone:
+      MOV R1, #0        //set y to top
+      CMP R0, #45       //already done both?
+      BEQ END           //end
+      MOV R0, #45       //Move to right side of play area
+      B barDown         //repeat
+//
+//end initial screen
+//
+//
+//Draw shape
+//
+shapeDrawer:
+      ADD R0, R0, #1    //increases x pos by 1
+      ADD R8, R8, #1    //vert counter
+      CMP R8, #4        //sees if vert counter is done
+      BEQ Down          //moves down
+      CMP R4, #36       //checks if shape is done
+      BEQ stop          //stops
+      LDR R5, [R4 + R6] //gets spin index
+      LDR R5, [R7 + R5] //loads if there is a pixel required here
+      ADD R4, R4, #4    //increases word count
+      CMP R5, #0        //checks if a pixel if required here
+      BEQ shapeDrawer   //repeats function
+      PUSH {R3-R12, LR}
+      BL drawPixel      //draws pixel
+      POP {R3-R12, LR}
+      B shapeDrawer     //repeats function
+      HALT              //stops for error
+Down:
+      MOV R8, #0        //resets line counter
+      ADD R1, R1, #1    //increases y-coord
+      SUB R0, R0, #4    //sets x-coord back to left
+      B shapeDrawer     //repeats drawing function
+stop:
+      SUB R1, R1, #3    //moves back to top
+      RET               //returns to the program
+drawPixel:
+      MOV R3, #.PixelScreen //sets the pixel screen
+      LSL R4, R0, #2    //multiplies x-coors by 4
+      LSL R5, R1, #8    //multiplies y-coords by 256
+      ADD R5, R5, R4    //adds togeather to get the position
+      STR R2, [R3+R5]   //draws pixel
+      RET               //returns
+//
+//End draw shape
+//
+//
+//Gets the shape
+//
+randomizedCheck:
+      MOV R6, #SpinOne  //sets to the first spin
+      MOV R10, #0
+      LDR R5, .Random   //gets a random 32-bit number
+      AND R5, R5, #15   //limits it to be between 0-4
+      CMP R5, #0
+      BEQ randomizedCheck
+      CMP R5, #3        //checks the random number
+      BLT setL          //sets as L
+      CMP R5, #6        //checks the random number
+      BLT setr          //sets as r
+      CMP R5, #9        //checks the random number
+      BLT setT          //sets as T
+      CMP R5, #12       //checks the random number
+      BLT setS          //sets as S
+      CMP R5, #15       //checks the random number
+      BLT setZ          //sets as Z
+setL:MOV R7, #arrayL    //functions to set shapes
+      RET
+setr:MOV R7, #arrayr
+      RET
+setT:MOV R7, #arrayT
+      RET
+setS:MOV R7, #arrayS
+      RET
+setZ:MOV R7, #arrayZ
+      RET               //end of functions to set shape
+      HALT
+//
+//end get shape
+//
+//
+//Move
+//
+Move: LDR R11, .LastKey //loads the last key input from the keyboard
+      CMP R11, #65      //compares it with letter A
+      BEQ setKey        //moves to setkey function
+      CMP R11, #68      //compares key with D
+      BEQ setKey        //moves to set key function
+      CMP R11, #87      //compares with W
+      BEQ setKey
+      RFE               //returns from interrupt if no relevent keys pressed
+leftMove:
+      SUB R0, R0, #1
+      BL LeftCheck
+      RFE
+LeftCheck:
+      ADD R0, R0, #1    //increases x by 1
+      ADD R8, R8, #1    //increases horizontal counter
+      CMP R8, #4        //checks if the shape is done with its line
+      BEQ DownCheckLeft //moves down
+      CMP R4, #36       //checks if shape is done
+      BEQ acceptL
+      LDR R5, [R4 + R6] //loads the rotation index
+      LDR R5, [R7 + R5] //loads if there is a pixel required here
+      ADD R4,R4,#4      //increases word count
+      CMP R5, #0        //checks if there is not supposed to be pixel
+      BEQ LeftCheck     //repeats
+      PUSH {R3-R12, LR} //adds stack
+      BL isDoneLeft     //checks if it has anything next to it
+      POP {R3-R12, LR}  //returns stack
+      B LeftCheck       //repeats
+isDoneLeft:
+      CMP R0, #22
+      BEQ NopeLeft
+      MOV R3, #.PixelScreen //sets the pixel screen
+      LSL R4, R0, #2    //gets words for x axis
+      LSL R5, R1, #8    //gets words for y axis
+      ADD R5, R4, R5    //adds x and y to get position
+      LDR R6, [R3+R5]   //loads the colour of that pixel
+      MOV R2, #.grey    //sets r2 to background
+      CMP R6, R2        //checks if fg matches bg
+      BNE NopeLeft      //sets it
+      RET               //returns
+DownCheckLeft:
+      MOV R8, #0        //resets line counter
+      ADD R1, R1, #1    //increases y-coord
+      SUB R0, R0, #4    //sets x-coord back to left
+      B LeftCheck       //repeats function
+NopeLeft:
+      POP {R3-R12, LR}
+      RFE
+acceptL:
+      SUB R0, R0, #1
+      RET
+//moving right
+rightMove:
+      ADD R0, R0, #1
+      BL RightCheck
+      RFE
+RightCheck:
+      ADD R0, R0, #1    //increases x by 1
+      ADD R8, R8, #1    //increases horizontal counter
+      CMP R8, #4        //checks if the shape is done with its line
+      BEQ DownCheckRight //moves down
+      CMP R4, #36       //checks if shape is done
+      BEQ acceptR
+      LDR R5, [R4 + R6] //loads the rotation index
+      LDR R5, [R7 + R5] //loads if there is a pixel required here
+      ADD R4,R4,#4      //increases word count
+      CMP R5, #0        //checks if there is not supposed to be pixel
+      BEQ RightCheck    //repeats
+      PUSH {R3-R12, LR} //adds stack
+      BL isDoneRight    //checks if it has anything next to it
+      POP {R3-R12, LR}  //returns stack
+      B RightCheck      //repeats
+isDoneRight:
+      CMP R0, #40
+      BEQ NopeRight
+      MOV R3, #.PixelScreen //sets the pixel screen
+      LSL R4, R0, #2    //gets words for x axis
+      LSL R5, R1, #8    //gets words for y axis
+      ADD R5, R4, R5    //adds x and y to get position
+      LDR R6, [R3+R5]   //loads the colour of that pixel
+      MOV R2, #.grey    //sets r2 to background
+      CMP R6, R2        //checks if fg matches bg
+      BNE NopeRight     //sets it
+      RET               //returns
+DownCheckRight:
+      MOV R8, #0        //resets line counter
+      ADD R1, R1, #1    //increases y-coord
+      SUB R0, R0, #4    //sets x-coord back to Rightt
+      B RightCheck      //repeats function
+NopeRight:
+      POP {R3-R12, LR}
+      RFE
+acceptR:
+      SUB R0, R0, #1
+      RET
+//
+//end Move
+//
+//
+//spin
+//
+Spin:
+      ADD R10, R10, #1  //move onto next spin
+      CMP R10, #1       //checks which spin its on
+      BEQ changeTwo     //changes to the correct spin
+      CMP R10,#2
+      BEQ changeThree
+      CMP R10, #3
+      BEQ changeFour 
+      MOV R10, #0       //reset back to 0 when loop finished
+      MOV R6, #SpinOne  //sets r6 to spin one
+      RFE
+changeTwo: MOV R6, #SpinTwo //sets the spin
+      RFE               //return from exception
+changeThree: MOV R6, #SpinThree
+      RFE
+changeFour: MOV R6, #SpinFour
+      RFE 
+//
+//end spin
+//
+END:  POP {R0-R12, LR}  //returns from stack
+      RET               //returns
+//
+//start arrays
+//
+arrayLength: 10         //stores the length of the arrays
+arrayL:0                //start of arrays of the shapes
+      1
+      0
+      0
+      1
+      0
+      0
+      1
+      1
+      .blue
+arrayr:0
+      1
+      0
+      0
+      1
+      0
+      1
+      1
+      0
+      .yellow
+arrayT:0
+      0
+      0
+      0
+      1
+      0
+      1
+      1
+      1
+      .purple
+arrayS: 1
+      0
+      0
+      1
+      1
+      0
+      0
+      1
+      0
+      .green
+arrayZ: 0
+      0
+      1
+      0
+      1
+      1
+      0
+      1
+      0
+      .red
+arraySQ: 1
+      1
+      1
+      1
+      .yellow           //end of arrays of shapes
+arrayI: 1
+      1
+      1
+      1
+      .cyan
+SpinOne: 0              //start of rotation arrays
+      4
+      8
+      12
+      16
+      20
+      24
+      28
+      32
+SpinTwo: 8
+      20
+      32
+      4
+      16
+      28
+      0
+      12
+      24
+SpinThree: 32
+      28
+      24
+      20
+      16
+      12
+      8
+      4
+      0
+SpinFour: 24
+      12
+      0
+      28
+      16
+      4
+      32
+      20
+      8                 //end of rotation arrays
